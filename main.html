@@ -588,130 +588,139 @@ bloomPass.radius   = 1.0;
             caneTexture.repeat.set(3, 3);
         }
 
-        class Particle {
-            constructor(mesh, type, isDust = false) {
-                this.mesh = mesh;
-                this.type = type;
-                this.isDust = isDust;
-                
-                this.posTree = new THREE.Vector3();
-                this.posScatter = new THREE.Vector3();
-                this.baseScale = mesh.scale.x; 
+// ===== shared temp objects (สร้างครั้งเดียว) =====
+const _focusWorldPos = new THREE.Vector3(0, 2, 35);
+const _invMainMatrix = new THREE.Matrix4();
 
-                const speedMult = (type === 'PHOTO') ? 0.3 : 2.0;
+class Particle {
+    constructor(mesh, type, isDust = false) {
+        this.mesh = mesh;
+        this.type = type;
+        this.isDust = isDust;
 
-                this.spinSpeed = new THREE.Vector3(
-                    (Math.random() - 0.5) * speedMult,
-                    (Math.random() - 0.5) * speedMult,
-                    (Math.random() - 0.5) * speedMult
-                );
+        this.posTree = new THREE.Vector3();
+        this.posScatter = new THREE.Vector3();
+        this.baseScale = mesh.scale.x;
 
-                this.calculatePositions();
-            }
+        // scale target (reuse)
+        this._targetScale = new THREE.Vector3();
 
-calculatePositions() {
-    if (this.type === 'PHOTO') {
-        this.posTree.set(0, 0, 0); // จะถูก update ใน updatePhotoLayout
-        this.posScatter.set(
-            (Math.random() - 0.5) * 40,
-            (Math.random() - 0.5) * 40,
-            (Math.random() - 0.5) * 40
+        // phase สำหรับ dust (แทน mesh.id)
+        this._dustPhase = Math.random() * Math.PI * 2;
+
+        // spin (PHOTO ช้ากว่า แต่ยังมีเหมือนเดิม)
+        const speedMult = (type === 'PHOTO') ? 0.3 : 2.0;
+        this.spinSpeed = new THREE.Vector3(
+            (Math.random() - 0.5) * speedMult,
+            (Math.random() - 0.5) * speedMult,
+            (Math.random() - 0.5) * speedMult
         );
-        return;
+
+        this.calculatePositions();
     }
 
-// --- Natural Spiral Galaxy ---
-const arms = 3;
-const armSeparation = (Math.PI * 2) / arms;
+    calculatePositions() {
+        if (this.type === 'PHOTO') {
+            this.posTree.set(0, 0, 0);
+            this.posScatter.set(
+                (Math.random() - 0.5) * 40,
+                (Math.random() - 0.5) * 40,
+                (Math.random() - 0.5) * 40
+            );
+            return;
+        }
 
-// กระจายรัศมีแบบ galaxy จริง (core หนา, outer บาง)
-const radius = Math.pow(Math.random(), 0.55) * 18;
+        // --- Natural Spiral Galaxy ---
+        const arms = 3;
+        const armSeparation = (Math.PI * 2) / arms;
 
-// ความโค้งของเกลียว (เพิ่มนิด)
-const spin = radius * 0.6;
+        const radius = Math.pow(Math.random(), 0.55) * 18;
+        const spin = radius * 0.6;
+        const armOffset = Math.floor(Math.random() * arms) * armSeparation;
+        const armNoise = (Math.random() - 0.5) * (0.6 + radius * 0.08);
+        const angle = spin + armOffset + armNoise * 0.15;
 
-// เลือกแขน
-const armOffset = Math.floor(Math.random() * arms) * armSeparation;
+        const height =
+            (Math.random() - 0.5) *
+            (1.8 * (1 - radius / 18));
 
-// noise ตามแขน (ทำให้แตกตัว)
-const armNoise = (Math.random() - 0.5) * (0.6 + radius * 0.08);
+        this.posTree.set(
+            Math.cos(angle) * (radius + armNoise),
+            height,
+            Math.sin(angle) * (radius + armNoise)
+        );
 
-// มุมสุดท้าย
-const angle = spin + armOffset + armNoise * 0.15;
+        const rScatter = 20 + Math.random() * 15;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
 
-// ความหนาแนวดิ่ง: หนาตรง core บางออกด้านนอก
-const height =
-    (Math.random() - 0.5) *
-    (1.8 * (1 - radius / 18));
+        this.posScatter.set(
+            rScatter * Math.sin(phi) * Math.cos(theta),
+            rScatter * Math.sin(phi) * Math.sin(theta),
+            rScatter * Math.cos(phi)
+        );
+    }
 
-this.posTree.set(
-    Math.cos(angle) * (radius + armNoise),
-    height,
-    Math.sin(angle) * (radius + armNoise)
-);
+    update(dt, mode, focusTargetMesh) {
+        let target = this.posTree;
 
-
-    // ตำแหน่งตอนกระจาย (Scatter)
-    const rScatter = 20 + Math.random() * 15;
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    this.posScatter.set(
-        rScatter * Math.sin(phi) * Math.cos(theta),
-        rScatter * Math.sin(phi) * Math.sin(theta),
-        rScatter * Math.cos(phi)
-    );
-}
-
-            update(dt, mode, focusTargetMesh) {
-                let target = this.posTree;
-                
-                if (mode === 'SCATTER') target = this.posScatter;
-                else if (mode === 'FOCUS') {
-                    if (this.mesh === focusTargetMesh) {
-                        const desiredWorldPos = new THREE.Vector3(0, 2, 35);
-                        const invMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
-                        target = desiredWorldPos.applyMatrix4(invMatrix);
-                    } else {
-                        target = this.posScatter;
-                    }
-                }
-
-                const lerpSpeed = (mode === 'FOCUS' && this.mesh === focusTargetMesh) ? 5.0 : 2.0; 
-                this.mesh.position.lerp(target, lerpSpeed * dt);
-
-                if (mode === 'SCATTER') {
-                    this.mesh.rotation.x += this.spinSpeed.x * dt;
-                    this.mesh.rotation.y += this.spinSpeed.y * dt;
-                    this.mesh.rotation.z += this.spinSpeed.z * dt; 
-                } else if (mode === 'GALAXY') {
-                    if (this.type === 'PHOTO') {
-                        this.mesh.lookAt(0, this.mesh.position.y, 0);
-                        this.mesh.rotateY(Math.PI);
-                    } else {
-                        this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0, dt);
-                        this.mesh.rotation.z = THREE.MathUtils.lerp(this.mesh.rotation.z, 0, dt);
-                        this.mesh.rotation.y += 0.5 * dt; 
-                    }
-                }
-                
-                if (mode === 'FOCUS' && this.mesh === focusTargetMesh) {
-                    this.mesh.lookAt(camera.position); 
-                }
-
-                let s = this.baseScale;
-                if (this.isDust) {
-                    s = this.baseScale * (0.8 + 0.4 * Math.sin(clock.elapsedTime * 0.8 + this.mesh.id));
-if (mode === 'GALAXY') s *= 0.35;
-                } else if (mode === 'SCATTER' && this.type === 'PHOTO') {
-                    s = this.baseScale * 2.5; 
-                } else if (mode === 'FOCUS') {
-                    if (this.mesh === focusTargetMesh) s = 4.5; 
-                    else s = this.baseScale * 0.8; 
-                }
-                
-                this.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4*dt);
+        if (mode === 'SCATTER') {
+            target = this.posScatter;
+        } 
+        else if (mode === 'FOCUS') {
+            if (this.mesh === focusTargetMesh) {
+                _invMainMatrix.copy(mainGroup.matrixWorld).invert();
+                target = _focusWorldPos.clone().applyMatrix4(_invMainMatrix);
+            } else {
+                target = this.posScatter;
             }
         }
+
+        const lerpSpeed =
+            (mode === 'FOCUS' && this.mesh === focusTargetMesh) ? 5.0 : 2.0;
+
+        this.mesh.position.lerp(target, lerpSpeed * dt);
+
+        // rotation
+        if (mode === 'SCATTER') {
+            this.mesh.rotation.x += this.spinSpeed.x * dt;
+            this.mesh.rotation.y += this.spinSpeed.y * dt;
+            this.mesh.rotation.z += this.spinSpeed.z * dt;
+        }
+        else if (mode === 'GALAXY') {
+            if (this.type === 'PHOTO') {
+                this.mesh.lookAt(0, this.mesh.position.y, 0);
+                this.mesh.rotateY(Math.PI);
+            } else {
+                this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0, dt);
+                this.mesh.rotation.z = THREE.MathUtils.lerp(this.mesh.rotation.z, 0, dt);
+                this.mesh.rotation.y += 0.5 * dt;
+            }
+        }
+
+        if (mode === 'FOCUS' && this.mesh === focusTargetMesh) {
+            this.mesh.lookAt(camera.position);
+        }
+
+        // scale
+        let s = this.baseScale;
+
+        if (this.isDust) {
+            s *= (0.8 + 0.4 * Math.sin(clock.elapsedTime * 0.8 + this._dustPhase));
+            if (mode === 'GALAXY') s *= 0.35;
+        }
+        else if (mode === 'SCATTER' && this.type === 'PHOTO') {
+            s *= 2.5;
+        }
+        else if (mode === 'FOCUS') {
+            s = (this.mesh === focusTargetMesh) ? 4.5 : this.baseScale * 0.8;
+        }
+
+        this._targetScale.set(s, s, s);
+        this.mesh.scale.lerp(this._targetScale, 4 * dt);
+    }
+}
+
 
 function updatePhotoLayout() {
     const photos = particleSystem.filter(p => p.type === 'PHOTO');
@@ -1048,7 +1057,7 @@ document.getElementById('toggle-ui-btn').addEventListener('click', () => {
     }
 });
 
-function createResizedTexture(img, maxSize = 768) {
+function createResizedTexture(img, maxSize = 384) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { alpha: false });
 
