@@ -411,12 +411,6 @@ particle3: 0xff8fbd, // Pink Rose
         let photoMeshGroup = new THREE.Group();
         let handLandmarker, video;
         let caneTexture; 
-
-        // --- Image Load Queue ---
-const imageQueue = [];
-let isProcessingQueue = false;
-const IMAGES_PER_FRAME = 1; // ปรับได้: 1–2 มือถือจะลื่นสุด
-
         const debugInfo = document.getElementById('debug-info');
 
         async function init() {
@@ -441,22 +435,13 @@ const IMAGES_PER_FRAME = 1; // ปรับได้: 1–2 มือถือ�
         // --- 增强版图片加载系统 ---
         function loadPredefinedImages() {
             const loader = new THREE.TextureLoader();
-    CONFIG.preload.images.forEach(url => {
-        loader.load(
-            url,
-            (t) => {
-                t.colorSpace = THREE.SRGBColorSpace;
-                imageQueue.push(t);
-
-                if (!isProcessingQueue) {
-                    isProcessingQueue = true;
-                    requestAnimationFrame(processImageQueue);
-                }
-            },
-            undefined,
-            (e) => { console.log(`Skipped: ${url}`); }
-        );
-    });
+            CONFIG.preload.images.forEach(url => {
+                loader.load(url, 
+                    (t) => { t.colorSpace = THREE.SRGBColorSpace; addPhotoToScene(t); },
+                    undefined,
+                    (e) => { console.log(`Skipped: ${url}`); }
+                );
+            });
 
             
 if (CONFIG.preload.autoScanLocal) {
@@ -834,29 +819,22 @@ const frameMat = new THREE.MeshPhysicalMaterial({
     }
         }
         
-function handleImageUpload(e) {
-    const files = e.target.files;
-    if (!files.length) return;
-
-    Array.from(files).forEach(f => {
-        if (!f.type.startsWith('image/')) return;
-
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            new THREE.TextureLoader().load(ev.target.result, (t) => {
-                t.colorSpace = THREE.SRGBColorSpace;
-                imageQueue.push(t);
-
-                if (!isProcessingQueue) {
-                    isProcessingQueue = true;
-                    requestAnimationFrame(processImageQueue);
+        function handleImageUpload(e) {
+            const files = e.target.files;
+            if(!files.length) return;
+            
+            Array.from(files).forEach(f => {
+                if (!f.type.startsWith('image/')) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    new THREE.TextureLoader().load(ev.target.result, (t) => {
+                        t.colorSpace = THREE.SRGBColorSpace;
+                        addPhotoToScene(t);
+                    });
                 }
+                reader.readAsDataURL(f);
             });
-        };
-        reader.readAsDataURL(f);
-    });
-}
-
+        }
 
         // --- MEDIAPIPE (Adaptive Fix) ---
         async function initMediaPipe() {
@@ -1035,22 +1013,6 @@ document.getElementById('toggle-ui-btn').addEventListener('click', () => {
         webcam.classList.toggle('ui-hidden');
     }
 });
-
-function processImageQueue() {
-    if (imageQueue.length === 0) {
-        isProcessingQueue = false;
-        return;
-    }
-
-    const batch = imageQueue.splice(0, IMAGES_PER_FRAME);
-
-    batch.forEach(texture => {
-        addPhotoToScene(texture);
-    });
-
-    requestAnimationFrame(processImageQueue);
-}
-
 
         init();
     </script>
