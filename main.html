@@ -411,7 +411,6 @@ particles: {
         let photoMeshGroup = new THREE.Group();
         let handLandmarker, video;
         let caneTexture; 
-        let lastFrame = 0;
         const debugInfo = document.getElementById('debug-info');
 
         async function init() {
@@ -983,14 +982,6 @@ delegate: IS_MOBILE ? "CPU" : "GPU"
         }
 
 function animate() {
-    if (IS_MOBILE) {
-        if (time - lastFrame < 33) {
-            requestAnimationFrame(animate);
-            return;
-        }
-        lastFrame = time;
-    }
-
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
 
