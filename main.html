@@ -371,7 +371,7 @@ input[type="file"] {
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'; 
         import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
-const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
         // --- 核心配置 ---
 const CONFIG = {
 colors: {
@@ -382,12 +382,12 @@ particle2: 0xb9a6ff, // Lavender ชัด
 particle3: 0xff8fbd, // Pink Rose
     photoFrame: 0xffffff
 },
-particles: {
-    count: IS_MOBILE ? 450 : 1200,
-    dustCount: IS_MOBILE ? 700 : 1800,
-    treeHeight: 24,
-    treeRadius: 8
-},
+    particles: {
+        count: 1200,    
+        dustCount: 1800, 
+        treeHeight: 24,  
+        treeRadius: 8    
+    },
     camera: { z: 50 },
     preload: {
         autoScanLocal: true,
@@ -411,6 +411,12 @@ particles: {
         let photoMeshGroup = new THREE.Group();
         let handLandmarker, video;
         let caneTexture; 
+
+        // --- Image Load Queue ---
+const imageQueue = [];
+let isProcessingQueue = false;
+const IMAGES_PER_FRAME = 1; // ปรับได้: 1–2 มือถือจะลื่นสุด
+
         const debugInfo = document.getElementById('debug-info');
 
         async function init() {
@@ -435,13 +441,22 @@ particles: {
         // --- 增强版图片加载系统 ---
         function loadPredefinedImages() {
             const loader = new THREE.TextureLoader();
-            CONFIG.preload.images.forEach(url => {
-                loader.load(url, 
-                    (t) => { t.colorSpace = THREE.SRGBColorSpace; addPhotoToScene(t); },
-                    undefined,
-                    (e) => { console.log(`Skipped: ${url}`); }
-                );
-            });
+    CONFIG.preload.images.forEach(url => {
+        loader.load(
+            url,
+            (t) => {
+                t.colorSpace = THREE.SRGBColorSpace;
+                imageQueue.push(t);
+
+                if (!isProcessingQueue) {
+                    isProcessingQueue = true;
+                    requestAnimationFrame(processImageQueue);
+                }
+            },
+            undefined,
+            (e) => { console.log(`Skipped: ${url}`); }
+        );
+    });
 
             
 if (CONFIG.preload.autoScanLocal) {
@@ -478,9 +493,7 @@ if (CONFIG.preload.autoScanLocal) {
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(
-    IS_MOBILE ? 1 : Math.min(window.devicePixelRatio, 1.5)
-);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // ลดจาก 2 → 1.5
 renderer.shadowMap.enabled = false; // ถ้าไม่ใช้ shadow
 renderer.physicallyCorrectLights = false; // ปรับให้คำนวณง่ายขึ้น
             renderer.toneMapping = THREE.ReinhardToneMapping; 
@@ -527,15 +540,9 @@ scene.add(rim);
 function setupPostProcessing() {
     const renderScene = new RenderPass(scene, camera);
     // ปรับค่าความฟุ้งให้กว้างขึ้นแต่จางลง (Radius สูง, Strength ต่ำ)
-const bloomResolution = IS_MOBILE
-    ? new THREE.Vector2(window.innerWidth / 3, window.innerHeight / 3)
-    : new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
-
 const bloomPass = new UnrealBloomPass(
-    bloomResolution,
-    IS_MOBILE ? 0.18 : 0.25,
-    0.35,
-    0.85
+    new THREE.Vector2(window.innerWidth/2, window.innerHeight/2), // ลด resolution
+    1.2, 0.35, 0.85
 );
 bloomPass.threshold = 0.75;
 bloomPass.strength = 0.25;
@@ -709,11 +716,7 @@ function updatePhotoLayout() {
 
 function createParticles() {
     // ใช้ทรงกลมเล็กๆ ทั้งหมดเพื่อให้ดูเหมือนฝุ่นดาว
-const starGeo = new THREE.SphereGeometry(
-    0.12,
-    IS_MOBILE ? 6 : 8,
-    IS_MOBILE ? 6 : 8
-);
+const starGeo = new THREE.SphereGeometry(0.12, 8, 8); // ลด segment จาก 16 → 8
     
     // สีสไตล์โฮโลแกรม (ฟ้า, ม่วง, ขาว)
 const colors = [
@@ -746,11 +749,7 @@ for (let i = 0; i < CONFIG.particles.count; i++) {
 }
 
 function createDust() {
-const geo = new THREE.SphereGeometry(
-    0.06,
-    IS_MOBILE ? 6 : 12,
-    IS_MOBILE ? 6 : 12
-);
+    const geo = new THREE.SphereGeometry(0.06, 12, 12); // ← กลม
 const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
@@ -835,22 +834,29 @@ const frameMat = new THREE.MeshPhysicalMaterial({
     }
         }
         
-        function handleImageUpload(e) {
-            const files = e.target.files;
-            if(!files.length) return;
-            
-            Array.from(files).forEach(f => {
-                if (!f.type.startsWith('image/')) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    new THREE.TextureLoader().load(ev.target.result, (t) => {
-                        t.colorSpace = THREE.SRGBColorSpace;
-                        addPhotoToScene(t);
-                    });
+function handleImageUpload(e) {
+    const files = e.target.files;
+    if (!files.length) return;
+
+    Array.from(files).forEach(f => {
+        if (!f.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            new THREE.TextureLoader().load(ev.target.result, (t) => {
+                t.colorSpace = THREE.SRGBColorSpace;
+                imageQueue.push(t);
+
+                if (!isProcessingQueue) {
+                    isProcessingQueue = true;
+                    requestAnimationFrame(processImageQueue);
                 }
-                reader.readAsDataURL(f);
             });
-        }
+        };
+        reader.readAsDataURL(f);
+    });
+}
+
 
         // --- MEDIAPIPE (Adaptive Fix) ---
         async function initMediaPipe() {
@@ -871,7 +877,7 @@ const frameMat = new THREE.MeshPhysicalMaterial({
             handLandmarker = await HandLandmarker.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-delegate: IS_MOBILE ? "CPU" : "GPU"
+                    delegate: "GPU"
                 },
                 runningMode: "VIDEO",
                 numHands: 1
@@ -1029,6 +1035,22 @@ document.getElementById('toggle-ui-btn').addEventListener('click', () => {
         webcam.classList.toggle('ui-hidden');
     }
 });
+
+function processImageQueue() {
+    if (imageQueue.length === 0) {
+        isProcessingQueue = false;
+        return;
+    }
+
+    const batch = imageQueue.splice(0, IMAGES_PER_FRAME);
+
+    batch.forEach(texture => {
+        addPhotoToScene(texture);
+    });
+
+    requestAnimationFrame(processImageQueue);
+}
+
 
         init();
     </script>
