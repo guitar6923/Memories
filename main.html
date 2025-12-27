@@ -400,7 +400,7 @@ top: calc(env(safe-area-inset-top, 14px) + 115px);
     }
 
     #debug-info {
-        font-size: 5px;
+        font-size: 8px;
         padding: 3px 6px;
     }
 }
@@ -1153,7 +1153,7 @@ document.getElementById('toggle-ui-btn').addEventListener('click', () => {
     controls.classList.toggle('ui-hidden');
 });
 
-function createResizedTexture(img, maxSize = 384) {
+function createResizedTexture(img, maxSize = 192) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { alpha: false });
 
