@@ -445,26 +445,58 @@ particle3: 0xff8fbd, // Pink Rose
 
             
 if (CONFIG.preload.autoScanLocal) {
+
     const loadedImagePaths = new Set();
+    const loadQueue = [];
+    let isLoading = false;
 
     fetch('/api/images')
         .then(res => res.json())
         .then(images => {
-            images.forEach(path => {
-                if (loadedImagePaths.has(path)) return
-                loadedImagePaths.add(path)
-
-                loader.load(path, t => {
-                    t.colorSpace = THREE.SRGBColorSpace
-                    addPhotoToScene(t)
-                })
-            })
+            loadQueue.push(...images);
+            loadNextImage();
         })
-        .catch(err => console.error('Failed to load images list', err))
+        .catch(err => console.error('Failed to load images list', err));
+
+    function loadNextImage() {
+        if (isLoading || loadQueue.length === 0) return;
+
+        isLoading = true;
+        const path = loadQueue.shift();
+
+        if (loadedImagePaths.has(path)) {
+            isLoading = false;
+            loadNextImage();
+            return;
+        }
+
+        loadedImagePaths.add(path);
+
+loader.load(
+    path,
+    t => {
+        const img = t.image;
+
+        // ❗ ทิ้ง texture ใหญ่
+        t.dispose();
+
+        // ✅ สร้าง texture ใหม่ที่ resize แล้ว
+        const resizedTex = createResizedTexture(img, 1024);
+        addPhotoToScene(resizedTex);
+
+        isLoading = false;
+        setTimeout(loadNextImage, 120);
+    },
+    undefined,
+    err => {
+        console.warn('Skip image:', path, err);
+        isLoading = false;
+        loadNextImage();
+    }
+);
+
+    }
 }
-
-
-
         }
 
         function initThree() {
@@ -752,72 +784,71 @@ blending: THREE.AdditiveBlending,
 }
 
 
-        function addPhotoToScene(texture) {
-const frameGeo = new THREE.BoxGeometry(1.35, 1.35, 0.02);
-// สลับสีกรอบ: ฟ้า / ชมพู
-const frameColors = [
-    CONFIG.colors.particle1, // ฟ้า
-    CONFIG.colors.particle3  // ชมพู
-];
+function addPhotoToScene(texture) {
 
-// ใช้จำนวนรูปที่มีอยู่เพื่อสลับสี
-const frameColor = frameColors[photoMeshGroup.children.length % frameColors.length];
+    // === FRAME ===
+    const frameGeo = new THREE.BoxGeometry(1.35, 1.35, 0.02);
 
-const frameMat = new THREE.MeshPhysicalMaterial({
-    color: frameColor,
-    emissive: frameColor,
-    emissiveIntensity: 0.35,
+    const frameColors = [
+        CONFIG.colors.particle1,
+        CONFIG.colors.particle3
+    ];
+    const frameColor =
+        frameColors[photoMeshGroup.children.length % frameColors.length];
 
-    roughness: 0.25,
-    metalness: 0.0,
+    // ✅ ใช้ Standard (แรง + ปลอดภัยทุกเครื่อง)
+    const frameMat = new THREE.MeshStandardMaterial({
+        color: frameColor,
+        emissive: frameColor,
+        emissiveIntensity: 0.25,
+        roughness: 0.45,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.9
+    });
 
-    transmission: 0.35,
-    thickness: 0.4,
+    const frame = new THREE.Mesh(frameGeo, frameMat);
 
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.15,
+    // === PHOTO SIZE ===
+    let width = 1.2;
+    let height = 1.2;
 
-    envMapIntensity: 1.5,
-    transparent: true
-});
-            const frame = new THREE.Mesh(frameGeo, frameMat);
-
-            let width = 1.2;
-            let height = 1.2;
-            
-            if (texture.image) {
-                const aspect = texture.image.width / texture.image.height;
-                if (aspect > 1) {
-                    height = width / aspect;
-                } else {
-                    width = height * aspect;
-                }
-            }
-
-            const photoGeo = new THREE.PlaneGeometry(width, height);
-            const photoMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-            const photo = new THREE.Mesh(photoGeo, photoMat);
-            photo.position.z = 0.04;
-
-            const group = new THREE.Group();
-            group.add(frame);
-            group.add(photo);
-            
-            frame.scale.set(width/1.2, height/1.2, 1);
-
-            const s = 0.8;
-            group.scale.set(s,s,s);
-            
-            photoMeshGroup.add(group);
-            particleSystem.push(new Particle(group, 'PHOTO', false));
-
-            updatePhotoLayout();
-                // Update photo count label
-    const photoCountLabel = document.getElementById('photo-count');
-    if(photoCountLabel) {
-        photoCountLabel.innerText = `Photos: ${photoMeshGroup.children.length}`;
+    if (texture.image?.width && texture.image?.height) {
+        const aspect = texture.image.width / texture.image.height;
+        if (aspect > 1) height = width / aspect;
+        else width = height * aspect;
     }
-        }
+
+    // === PHOTO ===
+    const photoGeo = new THREE.PlaneGeometry(width, height);
+    const photoMat = new THREE.MeshBasicMaterial({
+        map: texture,
+        side: THREE.DoubleSide
+    });
+    const photo = new THREE.Mesh(photoGeo, photoMat);
+    photo.position.z = 0.03;
+
+    // === GROUP ===
+    const group = new THREE.Group();
+    group.add(frame);
+    group.add(photo);
+
+    frame.scale.set(width / 1.2, height / 1.2, 1);
+
+    group.scale.set(0.75, 0.75, 0.75);
+
+    photoMeshGroup.add(group);
+    particleSystem.push(new Particle(group, 'PHOTO', false));
+
+    updatePhotoLayout();
+
+    const photoCountLabel = document.getElementById('photo-count');
+    if (photoCountLabel) {
+        photoCountLabel.innerText =
+            `Photos: ${photoMeshGroup.children.length}`;
+    }
+}
+
         
         function handleImageUpload(e) {
             const files = e.target.files;
@@ -827,10 +858,13 @@ const frameMat = new THREE.MeshPhysicalMaterial({
                 if (!f.type.startsWith('image/')) return;
                 const reader = new FileReader();
                 reader.onload = (ev) => {
-                    new THREE.TextureLoader().load(ev.target.result, (t) => {
-                        t.colorSpace = THREE.SRGBColorSpace;
-                        addPhotoToScene(t);
-                    });
+new THREE.TextureLoader().load(ev.target.result, (t) => {
+    const img = t.image;
+    t.dispose();
+
+    const resizedTex = createResizedTexture(img, 1024);
+    addPhotoToScene(resizedTex);
+});
                 }
                 reader.readAsDataURL(f);
             });
@@ -1013,6 +1047,35 @@ document.getElementById('toggle-ui-btn').addEventListener('click', () => {
         webcam.classList.toggle('ui-hidden');
     }
 });
+
+function createResizedTexture(img, maxSize = 768) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    let w = img.width;
+    let h = img.height;
+
+    const scale = Math.min(1, maxSize / Math.max(w, h));
+    w = Math.floor(w * scale);
+    h = Math.floor(h * scale);
+
+    canvas.width = w;
+    canvas.height = h;
+
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    // 🔥 ประหยัด RAM
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 1;
+
+    texture.needsUpdate = true;
+    return texture;
+}
 
         init();
     </script>
