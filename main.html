@@ -312,6 +312,55 @@ input[type="file"] {
     transform: scale(0.97);
 }
 
+/* ===== Floating Music Button (Top-Right) ===== */
+#music-btn {
+    all: unset;
+    pointer-events: auto;
+    position: fixed;
+
+    /* 🔑 ล็อกมุมขวาบน */
+    top: calc(env(safe-area-inset-top, 0px) + 17px);
+    right: calc(env(safe-area-inset-right, 0px) + 16px);
+
+    padding: 10px 14px;
+    border-radius: 999px;
+
+    font-family: 'Poppins', sans-serif;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.25);
+
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.25),
+        0 10px 24px rgba(0,0,0,0.45);
+
+    cursor: pointer;
+    z-index: 90; /* สูงกว่า UI อื่น */
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    transition: all 0.35s cubic-bezier(.4,0,.2,1);
+}
+
+#music-btn:hover {
+    background: rgba(255,255,255,0.22);
+    transform: translateY(-2px);
+}
+
+#music-btn:active {
+    transform: scale(0.95);
+}
+
+
 /* ===== Mobile UI Optimization ===== */
 @media (max-width: 768px) {
 
@@ -422,7 +471,12 @@ top: calc(env(safe-area-inset-top, 14px) + 115px);
     </script>
 </head>
 <body>
-
+<audio
+    id="bgm"
+    src="music/music.mp3"
+    loop
+    playsinline>
+</audio>
     <div id="loader">
         <div class="spinner"></div>
         <div class="loader-text">Loading Memories</div>
@@ -444,7 +498,8 @@ top: calc(env(safe-area-inset-top, 14px) + 115px);
                 <label class="upload-btn">
                     Select Files
                     <input type="file" id="file-input" multiple accept="image/*">
-                </label>-->
+                </label> -->
+
             </div>
         </div>
     </div>
@@ -453,6 +508,9 @@ top: calc(env(safe-area-inset-top, 14px) + 115px);
     Photos: 0
 </div>
 <button id="toggle-ui-btn" >Toggle UI</button>
+        <button id="music-btn" class="upload-btn">
+    ▶ Play Music
+</button>
     <div id="webcam-wrapper">
         <video id="webcam" autoplay playsinline></video>
         <div id="debug-info">Initializing...</div>
@@ -492,6 +550,14 @@ particle3: 0xff8fbd, // Pink Rose
     }
 };
 
+const VOLUME_BY_MODE = {
+    SCATTER: 0.4,   // ดังขึ้น
+    GALAXY: 0.2,    // เบาลง
+    FOCUS: 0.5      // (เผื่อไว้)
+};
+
+const MODE_FADE_TIME = 1.2; // วินาที (เนียนกว่า fade ปุ่ม)
+
         const STATE = {
             mode: 'GALAXY', 
             focusIndex: -1, 
@@ -508,6 +574,7 @@ particle3: 0xff8fbd, // Pink Rose
         let handLandmarker, video;
         let caneTexture; 
         const debugInfo = document.getElementById('debug-info');
+let lastMode = STATE.mode;
 
         async function init() {
             initThree();
@@ -595,27 +662,49 @@ loader.load(
 }
         }
 
-        function initThree() {
-            const container = document.getElementById('canvas-container');
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(CONFIG.colors.bg);
-            scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.01); 
+function initThree() {
+    const container = document.getElementById('canvas-container');
 
-            camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 2, CONFIG.camera.z); 
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(CONFIG.colors.bg);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // ลดจาก 2 → 1.5
-renderer.shadowMap.enabled = false; // ถ้าไม่ใช้ shadow
-renderer.physicallyCorrectLights = false; // ปรับให้คำนวณง่ายขึ้น
-            renderer.toneMapping = THREE.ReinhardToneMapping; 
-            renderer.toneMappingExposure = 2.2; 
-            container.appendChild(renderer.domElement);
+    // เพิ่ม fog นิดเดียว → ช่วยกลบ alias + depth เบาขึ้น
+    scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.012);
 
-            mainGroup = new THREE.Group();
-            scene.add(mainGroup);
-        }
+    camera = new THREE.PerspectiveCamera(
+        42,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        900 // ลด far นิดเดียว (ไม่กระทบฟีเจอร์)
+    );
+    camera.position.set(0, 2, CONFIG.camera.z);
+
+    renderer = new THREE.WebGLRenderer({
+        antialias: true,              // คงไว้ (ไม่พัง)
+        alpha: false,
+        powerPreference: "high-performance"
+    });
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // ✅ ลด DPR แค่นิดเดียว (ปลอดภัยทุกเครื่อง)
+    renderer.setPixelRatio(
+        Math.min(window.devicePixelRatio, 1.25)
+    );
+
+    renderer.shadowMap.enabled = false;
+    renderer.physicallyCorrectLights = false;
+
+    // ใช้ของเดิม แต่ลด exposure → ภาพนุ่มลง
+    renderer.toneMapping = THREE.ReinhardToneMapping;
+    renderer.toneMappingExposure = 1.8; // เดิม 2.2
+
+    container.appendChild(renderer.domElement);
+
+    mainGroup = new THREE.Group();
+    scene.add(mainGroup);
+}
+
 
         function setupEnvironment() {
             const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -1121,6 +1210,11 @@ STATE.rotation.x = THREE.MathUtils.lerp(
     1.2 * dt
 );
 
+    // 🔊 Sync volume with mode
+    if (STATE.mode !== lastMode) {
+        setVolumeByMode(STATE.mode);
+        lastMode = STATE.mode;
+    }
 
     // 2. Logic การหมุน
 if ((STATE.mode === 'SCATTER' || STATE.mode === 'GALAXY') && STATE.hand.detected) {
@@ -1239,6 +1333,96 @@ function createResizedTexture(img, maxSize = 192) {
         isDragging = false;
     });
 })();
+
+const bgm = document.getElementById('bgm');
+const musicBtn = document.getElementById('music-btn');
+
+let isPlaying = false;
+
+// Web Audio
+let audioCtx = null;
+let sourceNode = null;
+let gainNode = null;
+
+const MAX_VOLUME = 0.2;
+const FADE_TIME = 0.6; // วินาที
+
+// ===== Init Audio (ต้องเรียกจาก user gesture เท่านั้น) =====
+async function initAudio() {
+    if (audioCtx) return;
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioCtx.createMediaElementSource(bgm);
+    gainNode = audioCtx.createGain();
+
+    gainNode.gain.value = 0;
+
+    sourceNode.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+}
+
+// ===== Fade In =====
+function fadeIn() {
+    const now = audioCtx.currentTime;
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(MAX_VOLUME, now + FADE_TIME);
+}
+
+// ===== Fade Out =====
+function fadeOut(onDone) {
+    const now = audioCtx.currentTime;
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+    gainNode.gain.linearRampToValueAtTime(0, now + FADE_TIME);
+
+    setTimeout(() => {
+        onDone && onDone();
+    }, FADE_TIME * 1000);
+}
+
+// ▶ Play / Pause
+musicBtn.addEventListener('click', async () => {
+    try {
+        await initAudio();
+        await audioCtx.resume(); // 🔑 สำคัญมากบน iOS
+
+        // ▶ PLAY
+        if (!isPlaying) {
+            await bgm.play();
+
+            fadeIn();
+            musicBtn.innerText = '⏸ Pause Music';
+            isPlaying = true;
+        }
+        // ▶ PAUSE
+        else {
+            fadeOut(() => {
+                bgm.pause();
+                musicBtn.innerText = '▶ Play Music';
+                isPlaying = false;
+            });
+        }
+    } catch (e) {
+        console.warn('Audio error:', e);
+    }
+});
+
+function setVolumeByMode(mode) {
+    if (!audioCtx || !gainNode || !isPlaying) return;
+
+    const target =
+        VOLUME_BY_MODE[mode] ?? MAX_VOLUME;
+
+    const now = audioCtx.currentTime;
+
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+    gainNode.gain.linearRampToValueAtTime(
+        target,
+        now + MODE_FADE_TIME
+    );
+}
 
 
         init();
