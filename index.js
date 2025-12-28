@@ -10,8 +10,7 @@ const __dirname = path.dirname(__filename)
 
 // static images
 app.use('/images', express.static(path.join(__dirname, 'images')))
-app.use('/js', express.static(path.join(__dirname, 'js')))
-
+app.use('/music', express.static(path.join(__dirname, 'music')))
 // หน้าแรก
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'main.html'))
